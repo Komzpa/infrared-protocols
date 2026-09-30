@@ -687,7 +687,10 @@ def test_yap1f_roundtrip_and_flags() -> None:
     assert (decoded.power, decoded.mode, decoded.temperature, decoded.fan, decoded.display) == (
         True, GreeAcMode.COOL, 25, GreeAcFanSpeed.AUTO, True
     )
-    assert len(timings) == 420
+    assert all(duration != 0 for duration in timings)
+    assert all(duration > 0 for duration in timings[::2])
+    assert all(duration < 0 for duration in timings[1::2])
+    assert timings[-1] == 650
     decoded_bytes = []
     for block_start in (2, 142, 282):
         decoded_bytes.extend(
@@ -794,7 +797,7 @@ def test_yap1f_shared_flags_preserve_each_wire_bit(
 def test_yap1f_decodes_broadlink_quantized_timings() -> None:
     """Broadlink stores 8192/269 us ticks, including the 010 marker spaces."""
     command = GreeAcCommand(model=GreeAcModel.YAP1F, mode=GreeAcMode.COOL, temperature=25)
-    timings = command.get_raw_timings()[:-1]
+    timings = command.get_raw_timings()
     quantized = [
         (1 if duration > 0 else -1) * round(abs(duration) * 269 / 8192) * 8192 // 269
         for duration in timings
@@ -842,7 +845,7 @@ def test_yap1f_accepts_final_mark_with_supported_trailing_space(
         model=GreeAcModel.YAP1F, mode=GreeAcMode.COOL, temperature=25
     ).get_raw_timings()
     decoded = GreeAcCommand.from_raw_timings(
-        [*timings[:-1], *trailing], model=GreeAcModel.YAP1F
+        [*timings, *trailing], model=GreeAcModel.YAP1F
     )
     assert decoded is not None
     assert (decoded.mode, decoded.temperature) == (GreeAcMode.COOL, 25)
@@ -865,6 +868,8 @@ def test_yap1f_rejects_bad_marker_or_gap(index: int, value: int) -> None:
     timings = GreeAcCommand(
         model=GreeAcModel.YAP1F, mode=GreeAcMode.COOL, temperature=25
     ).get_raw_timings()
+    if index == len(timings):
+        timings.append(-20000)
     timings[index] = value
     assert GreeAcCommand.from_raw_timings(timings, model=GreeAcModel.YAP1F) is None
 
