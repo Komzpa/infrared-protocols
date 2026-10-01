@@ -139,15 +139,45 @@ def _command_for(label: str) -> GreeAcCommand:
 
 
 def test_encode_timing_values() -> None:
-    """Pin the physical layer: leader, bit mark, and the two bit spaces."""
+    """Pin the generic profile's unchanged physical layer."""
     timings = GreeAcCommand(mode=GreeAcMode.COOL, temperature=24).get_raw_timings()
 
     assert timings[:2] == [9000, -4500]
-    assert timings[2::2].count(562) > 0
     marks = [t for t in timings if t > 0]
     assert set(marks) == {9000, 562}
     spaces = {abs(t) for t in timings if t < 0}
     assert spaces == {4500, 1687, 562, 20100}
+
+
+def test_yap1f_timing_values_and_gap_boundaries() -> None:
+    """YAP1F timings match captured classes and end at a mark."""
+    timings = GreeAcCommand(
+        mode=GreeAcMode.COOL,
+        temperature=16,
+        fan=GreeAcFanSpeed.HIGH,
+        model=GreeAcModel.YAP1F,
+    ).get_raw_timings()
+
+    assert len(timings) == 279
+    assert timings[0:2] == [8796, -4365]
+    assert [timings[index] for index in (73, 139, 213)] == [-19500, -39000, -19500]
+    assert timings[-1] == 673
+    assert {value for value in timings if value > 0} == {673, 8796}
+    assert {abs(value) for value in timings if value < 0} == {
+        516, 1580, 4365, 19500, 39000
+    }
+    decoded = GreeAcCommand.from_raw_timings(timings, model=GreeAcModel.YAP1F)
+    assert decoded is not None
+    assert (decoded.mode, decoded.temperature, decoded.fan) == (
+        GreeAcMode.COOL,
+        16,
+        GreeAcFanSpeed.HIGH,
+    )
+    invalid_gap = list(timings)
+    invalid_gap[139] = -19500
+    assert GreeAcCommand.from_raw_timings(
+        invalid_gap, model=GreeAcModel.YAP1F
+    ) is None
 
 
 def _retime_to_variant(timings: list[int]) -> list[int]:
@@ -1205,14 +1235,14 @@ def test_yap1f_matches_captured_first_frame(
     """The YAP1F encoder reproduces all 29 remote state frames byte for byte."""
     command = _command_from_yap1f_labels(labels, bytes.fromhex(frame1))
     timings = command.get_raw_timings()
-    assert len(timings) == 2 * (_YAP_FRAME_TIMINGS + 1)
+    assert len(timings) == 279
+    assert [timings[index] for index in (73, 139, 213)] == [-19500, -39000, -19500]
+    assert timings[-1] > 0
     frame_a, frame_b = _extract_frames(timings[:_YAP_FRAME_TIMINGS])
     encoded = bytes(_bytes_of(frame_a) + _bytes_of(frame_b))
     assert encoded == bytes.fromhex(frame1)
     assert [int(bit) for bit in frame_a[32:35]] == [0, 1, 0]
-    fixed_a, fixed_b = _extract_frames(
-        timings[_YAP_FRAME_TIMINGS + 1 : 2 * (_YAP_FRAME_TIMINGS + 1)]
-    )
+    fixed_a, fixed_b = _extract_frames(timings[_YAP_FRAME_TIMINGS + 1 :])
     assert bytes(_bytes_of(fixed_a) + _bytes_of(fixed_b)) == bytes.fromhex(
         "000000A0000000A0"
     )
